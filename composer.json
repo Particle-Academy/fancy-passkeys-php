@@ -1,0 +1,73 @@
+{
+    "name": "particle-academy/fancy-passkeys",
+    "description": "Passkey (WebAuthn) login for PHP — a thin, safe wrapper around web-auth/webauthn-lib that owns the parts it deliberately leaves to you: challenge issuance, single-use expiry, credential persistence, counter replay detection. Framework-free core plus a Laravel bridge that augments Fortify.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "passkey",
+        "passkeys",
+        "webauthn",
+        "fido2",
+        "authentication",
+        "login",
+        "laravel",
+        "fortify",
+        "particle-academy"
+    ],
+    "homepage": "https://github.com/Particle-Academy/fancy-passkeys-php",
+    "support": {
+        "issues": "https://github.com/Particle-Academy/fancy-passkeys-php/issues",
+        "source": "https://github.com/Particle-Academy/fancy-passkeys-php"
+    },
+    "authors": [
+        {
+            "name": "Particle Academy",
+            "homepage": "https://github.com/Particle-Academy"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "ext-json": "*",
+        "web-auth/webauthn-lib": "^5.3"
+    },
+    "require-dev": {
+        "pestphp/pest": "^3.0|^4.0",
+        "phpunit/phpunit": "^10.0|^11.0|^12.0",
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "spomky-labs/cbor-php": "^3.0"
+    },
+    "suggest": {
+        "illuminate/support": "Only needed for the optional Laravel bridge — service provider, Eloquent credential store, migrations, routes, and the Fortify-compatible login controller. Compatible with 11.x through 13.x. The framework-free PasskeyServer needs none of it.",
+        "laravel/fortify": "Passkey login registers alongside Fortify's routes and authenticates on Fortify's configured guard, so an app keeps password login, reset, and 2FA untouched."
+    },
+    "autoload": {
+        "psr-4": {
+            "FancyPasskeys\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "FancyPasskeys\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "pest"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "FancyPasskeys\\Laravel\\PasskeysServiceProvider"
+            ],
+            "aliases": {
+                "Passkeys": "FancyPasskeys\\Laravel\\Facades\\Passkeys"
+            }
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}
