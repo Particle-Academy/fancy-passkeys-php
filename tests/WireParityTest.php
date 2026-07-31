@@ -100,7 +100,7 @@ function wireParityServer(array $inputs): PasskeyServer
     );
 }
 
-it('emits registration options byte-identical to the Node twin', function () {
+it('emits registration options equal to the Node twin', function () {
     $inputs = wireFixture('inputs.json');
     $expected = wireFixture('registration-options.json');
 
@@ -121,7 +121,7 @@ it('emits registration options byte-identical to the Node twin', function () {
     expect(canonical($actual))->toBe(canonical($expected));
 });
 
-it('emits authentication options byte-identical to the Node twin', function () {
+it('emits authentication options equal to the Node twin', function () {
     $inputs = wireFixture('inputs.json');
     $expected = wireFixture('authentication-options.json');
 

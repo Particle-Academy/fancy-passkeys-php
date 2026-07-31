@@ -54,8 +54,10 @@ final class PasskeyException extends RuntimeException
     }
 
     /**
-     * Deliberately indistinguishable from {@see self::verificationFailed()} —
-     * same code family, same status, same message. See §5.5 of the plan.
+     * Indistinguishable from {@see self::verificationFailed()} ON THE WIRE —
+     * `toArray()` redacts the code, and the status and message already match.
+     * The exception keeps the precise code so a log can still tell them apart.
+     * See §5.5 of the plan.
      */
     public static function unknownCredential(?Throwable $previous = null): self
     {
@@ -100,13 +102,14 @@ final class PasskeyException extends RuntimeException
     /**
      * Normalise anything `web-auth/webauthn-lib` threw.
      *
-     * Only two upstream exceptions carry information the client is allowed to
-     * act on differently: a regressed counter (the app may want to tell the
-     * user their passkey looks copied) and a user-handle mismatch (the passkey
-     * belongs to another account). Everything else — wrong origin, wrong RP ID
-     * hash, missing user presence, bad signature, unparseable attestation —
-     * collapses to `verification_failed`, because distinguishing them for the
-     * caller is exactly the oracle we are trying not to build.
+     * Only two upstream exceptions are worth distinguishing INTERNALLY: a
+     * regressed counter (which must flag the credential and fire
+     * `PasskeyCloneDetected`) and a user-handle mismatch. Everything else —
+     * wrong origin, wrong RP ID hash, missing user presence, bad signature,
+     * unparseable attestation — collapses to `verification_failed` right here,
+     * because distinguishing them for the caller is exactly the oracle we are
+     * trying not to build. The two that survive are redacted again at the wire
+     * by {@see PasskeyErrorCode::wireCode()}, so the client sees one answer.
      *
      * The upstream message is never copied into the client-visible message. It
      * survives only as `previous`.
@@ -120,9 +123,17 @@ final class PasskeyException extends RuntimeException
         };
     }
 
+    /**
+     * The status that goes on the wire — the REDACTED code's status.
+     *
+     * All four codes that redact already answer 401, so this changes nothing
+     * today. It routes through `wireCode()` anyway so that adding a redaction
+     * for a code with a different status cannot quietly reintroduce the oracle
+     * through the status line while the body looks clean.
+     */
     public function httpStatus(): int
     {
-        return $this->errorCode->httpStatus();
+        return $this->errorCode->wireCode()->httpStatus();
     }
 
     /**
@@ -132,10 +143,15 @@ final class PasskeyException extends RuntimeException
      */
     public function toArray(): array
     {
+        // Redacted here and only here — see PasskeyErrorCode::wireCode(). The
+        // exception itself keeps the precise code so a log, a listener, or a
+        // metric can still tell an unknown credential from a bad signature.
+        $wire = $this->errorCode->wireCode();
+
         return [
             'error' => [
-                'code' => $this->errorCode->value,
-                'message' => $this->errorCode->clientMessage(),
+                'code' => $wire->value,
+                'message' => $wire->clientMessage(),
             ],
         ];
     }

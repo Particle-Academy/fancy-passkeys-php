@@ -53,11 +53,45 @@ enum PasskeyErrorCode: string
     }
 
     /**
+     * The code a client is allowed to see.
+     *
+     * True internally, redacted on the wire. Matching messages and statuses are
+     * not enough on their own: a distinct `code` is just as good an oracle as a
+     * distinct message, and it is the field a client actually branches on.
+     * Three codes say something about a credential the server holds —
+     *
+     * - `unknown_credential` — "no such credential here"
+     * - `user_handle_mismatch` — "it exists, but not for this account"
+     * - `counter_regressed` — "it exists and we think it was cloned"
+     *
+     * — and an unauthenticated caller has no business learning any of it. All
+     * four collapse to `verification_failed` once they cross the wire.
+     *
+     * The enum case keeps the precise value for logs, events, and metrics; only
+     * {@see PasskeyException::toArray()} redacts. A clone detection still fires
+     * `PasskeyCloneDetected` and still stamps `cloned_at` — the app tells the
+     * user through a channel that has actually identified them, not through a
+     * login error a stranger can read.
+     */
+    public function wireCode(): self
+    {
+        return match ($this) {
+            self::UnknownCredential,
+            self::UserHandleMismatch,
+            self::CounterRegressed => self::VerificationFailed,
+
+            default => $this,
+        };
+    }
+
+    /**
      * The message that goes over the wire.
      *
-     * Note that `unknown_credential` and `verification_failed` deliberately
-     * share a message: a distinct "we have never seen that credential" is a
-     * credential-existence oracle. `PasskeyExceptionTest` asserts they match.
+     * Every redacted code (see {@see self::wireCode()}) must also carry the
+     * redacted code's message — redacting the code and leaving a message that
+     * still names the real failure would redact nothing. `PasskeyExceptionTest`
+     * asserts that every code and its wire code answer with the same message
+     * and the same status.
      */
     public function clientMessage(): string
     {

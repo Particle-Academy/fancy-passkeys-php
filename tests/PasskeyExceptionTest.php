@@ -42,6 +42,61 @@ it('makes an unknown credential indistinguishable from a bad signature', functio
     expect($unknown->httpStatus())->toBe($failed->httpStatus());
 });
 
+/*
+ * Matching messages are not enough on their own.
+ *
+ * `code` is the field a client actually branches on, so a distinct code is just
+ * as good an oracle as a distinct message. Each of these three reveals
+ * something about a credential the server holds, and all three must reach the
+ * client as `verification_failed`.
+ */
+it('redacts a credential-revealing code on the wire', function (PasskeyErrorCode $code, string $wouldLeak) {
+    $exception = new PasskeyException($code);
+    $failed = PasskeyException::verificationFailed();
+
+    // True internally — a log, a listener, or a metric still gets the real
+    // answer, which is what lets clone detection do its job.
+    expect($exception->errorCode)->toBe($code);
+
+    // Redacted on the way out, in every observable field at once.
+    expect($code->wireCode())->toBe(PasskeyErrorCode::VerificationFailed);
+    expect($exception->toArray())->toBe($failed->toArray());
+    expect($exception->httpStatus())->toBe($failed->httpStatus());
+
+    // And the thing it would otherwise have told a stranger is not in the body.
+    expect(json_encode($exception->toArray()))->not->toContain($wouldLeak);
+})->with([
+    'no such credential here' => [PasskeyErrorCode::UnknownCredential, 'unknown_credential'],
+    'exists, but not this account' => [PasskeyErrorCode::UserHandleMismatch, 'user_handle_mismatch'],
+    'exists and looks cloned' => [PasskeyErrorCode::CounterRegressed, 'counter_regressed'],
+]);
+
+it('redacts the message whenever it redacts the code', function () {
+    // Redacting the code but leaving a message that still names the real
+    // failure would redact nothing at all.
+    $exception = PasskeyException::counterRegressed();
+
+    expect($exception->getMessage())->toContain('copied');
+    expect($exception->toArray()['error']['message'])->not->toContain('copied');
+});
+
+it('leaves every non-redacted code exactly as it is', function (PasskeyErrorCode $code) {
+    $redacted = [
+        PasskeyErrorCode::UnknownCredential,
+        PasskeyErrorCode::UserHandleMismatch,
+        PasskeyErrorCode::CounterRegressed,
+    ];
+
+    if (in_array($code, $redacted, true)) {
+        expect($code->wireCode())->toBe(PasskeyErrorCode::VerificationFailed);
+
+        return;
+    }
+
+    expect($code->wireCode())->toBe($code);
+    expect((new PasskeyException($code))->toArray()['error']['code'])->toBe($code->value);
+})->with(PasskeyErrorCode::cases());
+
 it('serialises to the wire error shape', function () {
     $body = PasskeyException::challengeExpired()->toArray();
 

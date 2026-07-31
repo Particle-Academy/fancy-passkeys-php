@@ -16,7 +16,10 @@ leaves to the caller — and what almost every hand-rolled integration gets wron
 4. **Normalising errors** into a closed, wire-safe set.
 
 It has a Node twin, [`@particle-academy/fancy-passkeys`][js-twin], which emits
-byte-identical payloads so one React surface works against either backend.
+an equal payload for the same inputs — deep-equal once parsed, since key order
+is not part of the contract — so one React surface works against either backend.
+`tests/WireParityTest.php` holds both sides to fixtures generated from the real
+`@simplewebauthn/server`.
 
 [webauthn-lib]: https://github.com/web-auth/webauthn-framework
 [js-twin]: https://www.npmjs.com/package/@particle-academy/fancy-passkeys
@@ -281,18 +284,31 @@ backwards.
 
 ### Errors and what they do and do not reveal
 
-`unknown_credential` and `verification_failed` return the **same HTTP status and
-the same message**, because a distinct "we have never seen that credential"
-answers "is this passkey registered here?" for anyone who can post to the
-endpoint. The upstream library message — which names the failed check — is kept
-as the exception's `previous` for your logs and never crosses the wire.
+**Three codes are true internally and redacted on the wire.** Each one answers a
+question about a credential this server holds, for a caller who has not
+authenticated:
 
-Two honest caveats:
+| Internal code | What it would reveal | On the wire |
+|---|---|---|
+| `unknown_credential` | "no such credential here" | `verification_failed` |
+| `user_handle_mismatch` | "it exists, but not for this account" | `verification_failed` |
+| `counter_regressed` | "it exists and we think it was cloned" | `verification_failed` |
 
-- The `code` field still distinguishes `unknown_credential` from
-  `verification_failed`, because the shared error set the Node twin exports
-  contains both. **Treat them identically in UI**, and do not surface the
-  difference to an unauthenticated caller.
+All four share one status (401) and one message, so there is nothing left to
+compare. Matching messages alone would not have been enough: `code` is the field
+a client branches on, and a distinct code is just as good an oracle as a
+distinct message.
+
+`PasskeyException::$errorCode` keeps the **precise** value, so your logs,
+listeners and metrics still see the real answer — a clone detection still stamps
+`cloned_at` and still fires `PasskeyCloneDetected`. Only `toArray()` redacts.
+Tell the user about a suspected clone through a channel that has actually
+identified them; a login error is readable by a stranger.
+
+The upstream library message — which names the failed check — is kept as the
+exception's `previous` for your logs and never crosses the wire.
+
+One honest caveat:
 - Only `counter_regressed` and `user_handle_mismatch` are mapped from specific
   library exceptions. Wrong origin, wrong RP ID hash, missing user presence,
   missing user verification and a bad signature all collapse to
@@ -303,7 +319,7 @@ Two honest caveats:
 
 `POST /passkeys/login/options` with an unknown email returns **200 with an empty
 `allowCredentials`**, never a 404 — a 404 there is a free enumeration endpoint.
-A known user with no passkeys yet produces the byte-identical response.
+A known user with no passkeys yet produces an identical response.
 
 **The timing difference is not closed.** A real lookup happens either way, and
 we have not measured the delta. If timing-based enumeration is in your threat
