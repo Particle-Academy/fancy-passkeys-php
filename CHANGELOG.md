@@ -11,6 +11,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## 0.1.0 — 2026-08-01
+
+**First published release.** Passkey (WebAuthn) login for Laravel — a thin wrapper over `web-auth/webauthn-lib` with **no cryptography of our own**. Augments Fortify rather than replacing it.
+
 ### Added
 
 - Initial implementation. **Not published** — nothing is tagged and Packagist
