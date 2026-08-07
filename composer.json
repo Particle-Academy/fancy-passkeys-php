@@ -26,7 +26,7 @@
         }
     ],
     "require": {
-        "php": "^8.2",
+        "php": "^8.4",
         "ext-json": "*",
         "web-auth/webauthn-lib": "^5.3"
     },
