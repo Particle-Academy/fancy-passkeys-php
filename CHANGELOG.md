@@ -11,6 +11,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## 0.2.1 — 2026-08-09
+
+### Added
+
+- **Cross-user credential reuse is now tested in the DISCOVERABLE flow too**,
+  closing the last gap against the Node twin's coverage.
+
+  The username-first flow was already covered: the wrapper compares the stored
+  handle against the account the ceremony named. The discoverable flow takes a
+  different path — there is no named account, so that comparison is skipped and
+  the handle the authenticator reports is the only thing tying the credential to
+  a user. Two cases now cover it: a reported handle that is not the stored one,
+  and no reported handle at all.
+
+  Both were already refused correctly, by `webauthn-lib`'s `CheckUserHandle` —
+  this is test coverage, **not a fix, and no behaviour changed**. It is worth
+  having because the check is invisible from this package: nothing in `src/`
+  shows it happening, so nothing would have noticed it stop. Verified by
+  mutation — handing the library a non-null expected handle (a plausible
+  "tidy-up") makes the absent-handle case pass silently, and now fails the suite.
+
+
 ## 0.2.0 — 2026-08-07
 
 ### Changed

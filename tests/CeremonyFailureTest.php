@@ -181,6 +181,61 @@ it('rejects a credential whose stored user handle is not the one the ceremony na
         ->toBe(PasskeyErrorCode::UserHandleMismatch);
 });
 
+/**
+ * The DISCOVERABLE half of cross-user credential reuse.
+ *
+ * The test above covers the username-first flow, where the wrapper compares the
+ * stored handle against the one the ceremony named. In the discoverable flow
+ * there IS no named account -- `startAuthentication()` takes no username -- so
+ * that comparison is skipped entirely and the asserted handle is the ONLY thing
+ * tying the credential to a user.
+ *
+ * The check is real but INVISIBLE from this repo: it lives in webauthn-lib's
+ * CheckUserHandle, which we reach by passing a null expected handle. Nothing in
+ * src/ shows it happening, so nothing here would notice if it stopped -- swap
+ * the validator, or "tidy" that null into something non-null, and the branch
+ * silently changes. That is exactly the class of auth bug that does not throw:
+ * it accepts an assertion it should have refused, forever, and the suite stays
+ * green. Hence these two.
+ */
+it('rejects a discoverable assertion whose reported handle is not the stored one', function () {
+    $credential = makeStoredCredential('Y3JlZC1hbGljZQ', ALICE);
+    $server = makePasskeyServer([$credential]);
+
+    // No username: the credential is found on its ID alone, and it IS Alice's.
+    $start = $server->startAuthentication();
+
+    // ...but the authenticator claims it belongs to Bob. Accepting this is a
+    // session as the wrong user, from a credential that verifies perfectly.
+    $response = Ceremony::authenticationResponse(
+        $start['publicKey']['challenge'],
+        Base64Url::decode($credential->id),
+        BOB,
+    );
+
+    expect(errorCodeOf(fn () => $server->finishAuthentication($start['state'], $response)))
+        ->toBe(PasskeyErrorCode::UserHandleMismatch);
+});
+
+it('rejects a discoverable assertion that reports no handle at all', function () {
+    $credential = makeStoredCredential('Y3JlZC1hbGljZQ', ALICE);
+    $server = makePasskeyServer([$credential]);
+
+    $start = $server->startAuthentication();
+
+    // An absent handle must not read as "nothing to disagree with". In the
+    // discoverable flow it is the whole identification step, so missing is a
+    // refusal, not a pass.
+    $response = Ceremony::authenticationResponse(
+        $start['publicKey']['challenge'],
+        Base64Url::decode($credential->id),
+        null,
+    );
+
+    expect(errorCodeOf(fn () => $server->finishAuthentication($start['state'], $response)))
+        ->toBe(PasskeyErrorCode::UserHandleMismatch);
+});
+
 it('rejects a response that is not the ceremony it was asked for', function () {
     $server = makePasskeyServer();
     $start = $server->startRegistration(new PasskeyUser(ALICE, 'alice@example.com', 'Alice'));
