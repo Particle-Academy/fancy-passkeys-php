@@ -1,5 +1,7 @@
 # Fancy Passkeys (PHP)
 
+[![Fancified](art/fancified.svg)](https://particle.academy)
+
 **Passkey (WebAuthn) login for PHP.** A framework-free core plus a Laravel
 bridge that augments Fortify instead of replacing it.
 
@@ -32,7 +34,7 @@ is not part of the contract — so one React surface works against either backen
 composer require particle-academy/fancy-passkeys
 ```
 
-Requires PHP 8.2+. Laravel (11.x–13.x) and Fortify are **suggests**, not
+Requires PHP 8.4+. Laravel (11.x–13.x) and Fortify are **suggests**, not
 requirements — the core runs without them.
 
 ---
