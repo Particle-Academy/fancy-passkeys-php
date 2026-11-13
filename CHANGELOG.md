@@ -11,6 +11,36 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **`RelyingParty` now accepts `*.localhost` hosts over plain http.** A
+  configuration such as RP ID `genie.localhost` with origin
+  `http://genie.localhost:5678` threw at construction, although Chromium runs
+  WebAuthn there without complaint. http is allowed for `localhost` and for any
+  name whose LAST LABEL is exactly `localhost` (`foo.localhost`,
+  `a.b.localhost`), at any port. `localhost.evil.com` and `evilocalhost` still
+  need https. The RP ID / origin rule is unchanged: the RP ID must be the
+  origin's host or a registrable suffix of it.
+- A non-https, non-http scheme on a localhost host (`ftp://localhost`) is now
+  refused; only http is relaxed.
+
+### Security
+
+- **SECURITY-RELEVANT — IP-address hosts are no longer accepted, including
+  `127.0.0.1` and `[::1]`.** `RelyingParty` used to allow http on `127.0.0.1`
+  and `[::1]`, and an RP ID equal to either. Chromium refuses an IP literal as
+  an RP ID ("This is an invalid domain"), so such a configuration constructed
+  cleanly and then failed every ceremony in the browser. Any IPv4 or IPv6
+  literal is now refused at construction, as an RP ID and as an origin host,
+  over http or https. IPv4 is detected by the URL standard's "ends in a number"
+  rule, so short forms such as `127.1` are caught too. **Consumer action:** only
+  if `PASSKEYS_RP_ID` / `PASSKEYS_ORIGINS` (or an `APP_URL` they default from)
+  name an IP such as `http://127.0.0.1:8000`: switch to `localhost` or a
+  `*.localhost` name. Those configurations never worked in a browser, so
+  nothing that worked before stops working. The accepted and refused cases are
+  a fixture table (`tests/fixtures/relying-party/origins.json`) shared with the
+  Node twin.
+
 ## 0.2.1 — 2026-08-09
 
 ### Added

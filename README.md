@@ -68,7 +68,9 @@ failing with an opaque browser error and no server-side signal at all.
 
 For local development: `PASSKEYS_RP_ID=localhost` and
 `PASSKEYS_ORIGINS=http://localhost:5173`. `http://` is accepted only on
-`localhost` / `127.0.0.1`.
+`localhost` and `*.localhost` hosts (e.g. `http://myapp.localhost:8000` with
+`PASSKEYS_RP_ID=myapp.localhost`). IP-address hosts such as `127.0.0.1` are
+refused, because browsers refuse them as an RP ID.
 
 ### 3. Add the trait
 
