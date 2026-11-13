@@ -233,6 +233,117 @@ Ship-ready implementations: `Support\InMemoryChallengeStore` /
 `Support\InMemoryCredentialStore` (one process; tests and scripts), and
 `Laravel\CacheChallengeStore` / `Laravel\EloquentCredentialStore`.
 
+### Origins resolved at run time
+
+`$origins` may be a `Closure` instead of a list. It is called on **every**
+verification, and every list it returns is validated with exactly the rules a
+static list gets at construction: https, or http only on `localhost` and
+`*.localhost`; no IP-address hosts; the RP ID must be the host or a registrable
+suffix of it. A value the constructor would refuse is refused at verification
+too, every time, as an `InvalidArgumentException` (a configuration error, never
+a `PasskeyException` a client sees), and no validator is built.
+
+```php
+$rp = new RelyingParty('localhost', 'My Desktop App',
+    fn (): array => ["http://localhost:{$localServer->port()}"]);
+
+// Or swap the allow-list on a live instance. A fixed list is validated now,
+// and a refused one leaves the previous configuration in place.
+$rp->setOrigins(['http://localhost:51234']);
+$rp->setOrigins($settings->origins(...));
+```
+
+A `Closure` rather than any `callable` on purpose: a two-string origin list can
+also be a callable array. Wrap a method with first-class callable syntax. In
+Laravel, call `setOrigins()` on the `RelyingParty` singleton from a service
+provider's `boot()` (config files cannot hold closures once cached). The
+resolver must never read the request being verified.
+
+### Desktop apps: one user, one credential per device
+
+A desktop app usually has exactly one account. The shape that works:
+
+- **One user handle**: 32 random bytes minted once, on first run, kept in the
+  app's settings. Never a username, a machine id or anything from the OS
+  account.
+- **One credential per enrolled device**: this laptop's platform authenticator,
+  a phone over hybrid, a security key. Each is its own credential under the one
+  handle; `excludeCredentials` stops the same authenticator enrolling twice, and
+  losing a device means revoking one credential, not resetting the account.
+- **RP ID `localhost`** (or a `*.localhost` name) with the local server's origin
+  from a resolver, because the port is often chosen at launch. Never an IP
+  literal: browsers refuse `127.0.0.1` as an RP ID, so it is refused here.
+- **Sign in with the discoverable flow** (`startAuthentication()` with no
+  handle): with one account there is nothing to type.
+- **Persist the credential store** in the app's own database or settings file;
+  `InMemoryChallengeStore` is fine for a single local process.
+
+### Login certificates
+
+**Optional, and off unless you turn them on.** When a ceremony succeeds, the
+server can build a *login certificate*: a canonical record of the ceremony plus
+whatever claims your app supplies, and a token that is the SHA-256 of that
+record. Log the token with the request, store the certificate in an audit
+table, and check either against the other later.
+
+```php
+use FancyPasskeys\{IssuedLoginCertificate, LoginCertificate, LoginCertificates};
+
+$server = new PasskeyServer($rp, PasskeyPolicy::default(), $challenges, $credentials,
+    certificates: new LoginCertificates(
+        claims: fn (array $subject): array => ['app' => 'desktop'],          // host-wide defaults
+        deliver: function (IssuedLoginCertificate $issued) use ($audit): void {
+            $audit->insert(['token' => $issued->token, 'certificate' => $issued->canonical]);
+        },
+    ),
+);
+
+$result = $server->finishAuthentication($state, $response, [
+    'ip' => $request->ip(), 'requestId' => $request->header('X-Request-Id'),
+]);
+$result['certificate']?->token;    // "fplc_v1_2a5e10b3..."
+
+LoginCertificate::verify($storedCanonicalJson, $token);   // true | false, never throws
+```
+
+In Laravel, set `PASSKEYS_CERTIFICATES=true` and listen for
+`FancyPasskeys\Laravel\Events\PasskeyCertificateIssued`. Claims default to the
+request's `ip`, `userAgent` and `X-Request-Id`; name an invokable class in
+`passkeys.certificates.claims` to choose your own. The package stores nothing.
+
+The v1 certificate, its canonical bytes and its token are identical in PHP and
+Node: the canonical form is change-council's canonical JSON (keys sorted at
+every depth, lists in order, no whitespace, slashes and non-ASCII unescaped),
+and `tests/fixtures/login-certificate/vectors.json` is shared with the Node
+twin. The token is `fplc_v1_` + 64 lowercase hex characters of SHA-256 over
+those bytes. Each certificate carries a 16-byte random nonce, so identical
+sign-ins never share a token and a token cannot be reversed by guessing an IP
+and a time.
+
+**Read a stored certificate back as JSON objects**, not an associative array:
+`json_decode($json, false)`, or pass the JSON string to `verify()`. An
+associative decode turns a nested empty object into a list, which has
+different bytes. (A top-level empty `claims` is handled, since it is always an
+object by schema.)
+
+**What a token is not.** It is a hash, not a signature: anyone holding a
+certificate can compute its token. A match proves the record and token belong
+together, not who wrote them, and a token is never proof of a session.
+
+**No secrets in a certificate.** Do not put passwords, tokens, cookies, API
+keys, session ids or any credential in the claims. As a backstop, keys that look
+sensitive are stripped at any depth and reported in `$issued->stripped`. The
+match ignores case and punctuation: any key containing `password`, `passwd`,
+`secret`, `token`, `apikey`, `authorization`, `cookie`, `privatekey`,
+`sessionid` or `recoverycode`, and any key that is exactly `otp`, `totp`, `pin`,
+`pwd`, `cvv`, `ssn`, `session` or `auth`. That catches the obvious names; it
+does not make a credential safe under any other name.
+
+**Claim values** must have one canonical form in both runtimes, so issuing
+throws `InvalidArgumentException` for floats (send them as strings), integers
+beyond 2^53-1, keys that are not printable ASCII or are all digits, objects
+other than `stdClass`, and invalid UTF-8.
+
 ---
 
 ## Security defaults

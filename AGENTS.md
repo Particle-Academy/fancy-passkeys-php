@@ -112,6 +112,27 @@ and the Node repo asserts against the same files. If you change a wire shape
 here, change it there in the same session, or the pair quietly stops being a
 pair.
 
+## Login certificates: the same bytes in both runtimes
+
+`src/Support/CanonicalJson.php` is a COPY of change-council's class (the class
+body is identical; only the namespace differs). Do not "improve" it: a token
+minted by one backend must verify on the other.
+`tests/fixtures/login-certificate/vectors.json` is generated in the Node repo by
+`scripts/generate-certificate-fixtures.ts` and copied here unchanged. The claim
+rules in `LoginCertificate` (printable-ASCII, not-all-digit keys; safe
+integers; no floats) are exactly the places PHP and JavaScript would
+canonicalise differently.
+
+## The signature algorithm manager is built from the policy
+
+`CeremonyStepManagerFactory`'s default verifies only ES256 and RS256, while the
+policy offers Ed25519 first. `PasskeyServer` builds the manager from
+`PasskeyPolicy::$algorithms` and refuses an identifier it has no verifier for.
+Drop that and Ed25519 passkeys enroll and then never sign in.
+`tests/CertificateIssuanceTest.php` completes real ceremonies with
+`tests/Support/SoftwareAuthenticator.php` (Ed25519 via sodium, tests only), so
+that regression fails CI.
+
 ## Commands
 
 ```bash

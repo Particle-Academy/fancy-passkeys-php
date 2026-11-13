@@ -5,12 +5,25 @@ declare(strict_types=1);
 namespace FancyPasskeys;
 
 use Closure;
+use Cose\Algorithm\Manager as AlgorithmManager;
+use Cose\Algorithm\Signature\ECDSA\ES256;
+use Cose\Algorithm\Signature\ECDSA\ES384;
+use Cose\Algorithm\Signature\ECDSA\ES512;
+use Cose\Algorithm\Signature\EdDSA\Ed25519;
+use Cose\Algorithm\Signature\RSA\PS256;
+use Cose\Algorithm\Signature\RSA\PS384;
+use Cose\Algorithm\Signature\RSA\PS512;
+use Cose\Algorithm\Signature\RSA\RS256;
+use Cose\Algorithm\Signature\RSA\RS384;
+use Cose\Algorithm\Signature\RSA\RS512;
+use Cose\Algorithm\Signature\Signature;
 use FancyPasskeys\Contracts\ChallengeStore;
 use FancyPasskeys\Contracts\CredentialStore;
 use FancyPasskeys\Support\Base64Url;
 use FancyPasskeys\Support\CounterCheck;
 use FancyPasskeys\Support\WireFormat;
 use InvalidArgumentException;
+use stdClass;
 use Symfony\Component\Serializer\Encoder\JsonEncode;
 use Symfony\Component\Serializer\Normalizer\AbstractObjectNormalizer;
 use Symfony\Component\Serializer\SerializerInterface;
@@ -55,11 +68,33 @@ use Webauthn\TrustPath\EmptyTrustPath;
  */
 final class PasskeyServer
 {
+    /**
+     * The COSE signature algorithms `web-auth` can verify, by identifier: the
+     * library's own classes, selected here, never implemented here.
+     *
+     * @var array<int, class-string<Signature>>
+     */
+    private const SIGNATURE_ALGORITHMS = [
+        -8 => Ed25519::class,
+        -7 => ES256::class,
+        -35 => ES384::class,
+        -36 => ES512::class,
+        -257 => RS256::class,
+        -258 => RS384::class,
+        -259 => RS512::class,
+        -37 => PS256::class,
+        -38 => PS384::class,
+        -39 => PS512::class,
+    ];
+
+    /** 16 bytes of login-certificate nonce. */
+    private const CERTIFICATE_NONCE_BYTES = 16;
+
     private readonly SerializerInterface $serializer;
 
-    private readonly AuthenticatorAttestationResponseValidator $attestationValidator;
+    private readonly AttestationStatementSupportManager $attestationSupport;
 
-    private readonly AuthenticatorAssertionResponseValidator $assertionValidator;
+    private readonly AlgorithmManager $algorithms;
 
     /** @var Closure(): int */
     private readonly Closure $clock;
@@ -71,6 +106,9 @@ final class PasskeyServer
      * @param  (Closure(): int)|null  $now  Epoch milliseconds.
      * @param  (Closure(int): string)|null  $randomBytes  CSPRNG. Never a timestamp,
      *                                                    counter, or hash of user data.
+     * @param  LoginCertificates|null  $certificates  Optional login certificates.
+     *                                                Null (the default): none are
+     *                                                issued and nothing is called.
      */
     public function __construct(
         public readonly RelyingParty $rp,
@@ -79,17 +117,62 @@ final class PasskeyServer
         private readonly CredentialStore $credentials,
         ?Closure $now = null,
         ?Closure $randomBytes = null,
+        private readonly ?LoginCertificates $certificates = null,
     ) {
         $this->clock = $now ?? static fn (): int => (int) (microtime(true) * 1000);
         $this->random = $randomBytes ?? static fn (int $length): string => random_bytes($length);
 
-        $attestationSupport = AttestationStatementSupportManager::create();
-        $attestationSupport->add(NoneAttestationStatementSupport::create());
+        $this->attestationSupport = AttestationStatementSupportManager::create();
+        $this->attestationSupport->add(NoneAttestationStatementSupport::create());
 
-        $this->serializer = (new WebauthnSerializerFactory($attestationSupport))->create();
+        $this->serializer = (new WebauthnSerializerFactory($this->attestationSupport))->create();
 
+        /*
+         * The signature algorithms the assertion check can verify are exactly
+         * the ones the policy offers. `CeremonyStepManagerFactory`'s default is
+         * ES256 + RS256 only, while the policy offers Ed25519 FIRST — so an
+         * authenticator that chose Ed25519 enrolled without complaint (the
+         * creation ceremony's CheckAlgorithm accepts it) and could then never
+         * sign in. An offered algorithm with no verifier is refused here, at
+         * boot, for the same reason.
+         */
+        $algorithms = AlgorithmManager::create();
+
+        foreach ($this->policy->algorithms as $identifier) {
+            $class = self::SIGNATURE_ALGORITHMS[$identifier] ?? null;
+
+            if ($class === null) {
+                throw new InvalidArgumentException(sprintf(
+                    'COSE algorithm %d is offered by the policy but web-auth/webauthn-lib cannot verify it, so a '
+                    . 'credential enrolled with it could never sign in. Supported: %s.',
+                    $identifier,
+                    implode(', ', array_keys(self::SIGNATURE_ALGORITHMS)),
+                ));
+            }
+
+            $algorithms->add($class::create());
+        }
+
+        $this->algorithms = $algorithms;
+    }
+
+    /** The login-certificate configuration, or null when certificates are off. */
+    public function certificates(): ?LoginCertificates
+    {
+        return $this->certificates;
+    }
+
+    /**
+     * Fresh ceremony steps for ONE verification, built on the origins resolved
+     * for it. A Closure-backed relying party is resolved and validated here,
+     * every time; an invalid list throws InvalidArgumentException (a
+     * configuration error, the app's 500) before any validator exists.
+     */
+    private function ceremonySteps(): CeremonyStepManagerFactory
+    {
         $factory = new CeremonyStepManagerFactory();
-        $factory->setAttestationStatementSupportManager($attestationSupport);
+        $factory->setAttestationStatementSupportManager($this->attestationSupport);
+        $factory->setAlgorithmManager($this->algorithms);
         // Exact-match allow-list. `allowSubdomains` stays false unless the app
         // knowingly turns it on: "ends with example.com" also ends with
         // "notexample.com" in every implementation that gets it wrong.
@@ -97,12 +180,48 @@ final class PasskeyServer
         // once an explicit origin list is set, so it is deliberately not used.)
         $factory->setAllowedOrigins($this->rp->origins(), $this->rp->allowSubdomains);
 
-        $this->attestationValidator = AuthenticatorAttestationResponseValidator::create(
-            $factory->creationCeremony()
+        return $factory;
+    }
+
+    /**
+     * Issue and deliver a login certificate when the host turned them on for
+     * this ceremony. Returns null otherwise, having called nothing.
+     */
+    private function issueCertificate(
+        CeremonyType $ceremony,
+        string $credentialId,
+        string $userHandle,
+        array|stdClass $claims,
+    ): ?IssuedLoginCertificate {
+        $certificates = $this->certificates;
+
+        if ($certificates === null || ! $certificates->appliesTo($ceremony)) {
+            return null;
+        }
+
+        $subject = [
+            'ceremony' => $ceremony->value,
+            'rpId' => $this->rp->id,
+            'credentialId' => $credentialId,
+            'userHandle' => $userHandle,
+        ];
+
+        $issued = LoginCertificate::issue(
+            ceremony: $ceremony,
+            issuedAt: $this->nowIso(),
+            nonce: Base64Url::encode(($this->random)(self::CERTIFICATE_NONCE_BYTES)),
+            rpId: $this->rp->id,
+            credentialId: $credentialId,
+            userHandle: $userHandle,
+            claims: array_replace(
+                $certificates->claimsFor($subject),
+                $claims instanceof stdClass ? get_object_vars($claims) : $claims,
+            ),
         );
-        $this->assertionValidator = AuthenticatorAssertionResponseValidator::create(
-            $factory->requestCeremony()
-        );
+
+        $certificates->deliver($issued);
+
+        return $issued;
     }
 
     // -----------------------------------------------------------------------
@@ -142,12 +261,19 @@ final class PasskeyServer
 
     /**
      * @param  array<string, mixed>|string  $response  `RegistrationResponseJSON`.
-     * @return array{credential: StoredCredential, summary: array<string, mixed>}
+     * @param  array<string, mixed>|stdClass  $certificateClaims  Claims for the login
+     *                                                            certificate, when they
+     *                                                            are on. Never credentials.
+     * @return array{credential: StoredCredential, summary: array<string, mixed>, certificate: ?IssuedLoginCertificate}
      *
      * @throws PasskeyException
      */
-    public function finishRegistration(string $state, array|string $response, ?string $name = null): array
-    {
+    public function finishRegistration(
+        string $state,
+        array|string $response,
+        ?string $name = null,
+        array|stdClass $certificateClaims = [],
+    ): array {
         // (1) Pull FIRST — before parsing, before verifying. `pull()` deletes as
         //     it reads, so a replayed response fails here no matter how valid
         //     its signature is. Inverting this ordering (verify, then delete)
@@ -190,9 +316,14 @@ final class PasskeyServer
             [],
         );
 
+        // Built per verification on the origins resolved for it. Outside the
+        // try: a refused origin list is a configuration error, not a failed
+        // ceremony to report to the client.
+        $validator = AuthenticatorAttestationResponseValidator::create($this->ceremonySteps()->creationCeremony());
+
         try {
             // (3) Only now does anything cryptographic happen.
-            $record = $this->attestationValidator->check($attestation, $options, $this->rp->host());
+            $record = $validator->check($attestation, $options, $this->rp->host());
         } catch (Throwable $e) {
             throw PasskeyException::fromWebauthn($e);
         }
@@ -203,7 +334,9 @@ final class PasskeyServer
         //     behind it. The check above races; the index does not.
         $this->credentials->save($stored);
 
-        return ['credential' => $stored, 'summary' => $stored->toSummary()];
+        $certificate = $this->issueCertificate(CeremonyType::Registration, $stored->id, $stored->userHandle, $certificateClaims);
+
+        return ['credential' => $stored, 'summary' => $stored->toSummary(), 'certificate' => $certificate];
     }
 
     // -----------------------------------------------------------------------
@@ -244,11 +377,14 @@ final class PasskeyServer
 
     /**
      * @param  array<string, mixed>|string  $response  `AuthenticationResponseJSON`.
-     * @return array{credential: StoredCredential, summary: array<string, mixed>, userHandle: string}
+     * @param  array<string, mixed>|stdClass  $certificateClaims  Claims for the login
+     *                                                            certificate, when they
+     *                                                            are on. Never credentials.
+     * @return array{credential: StoredCredential, summary: array<string, mixed>, userHandle: string, certificate: ?IssuedLoginCertificate}
      *
      * @throws PasskeyException
      */
-    public function finishAuthentication(string $state, array|string $response): array
+    public function finishAuthentication(string $state, array|string $response, array|stdClass $certificateClaims = []): array
     {
         // Same pull-first ordering as registration, for the same reason.
         $challenge = $this->pullChallenge($state, CeremonyType::Authentication);
@@ -297,8 +433,11 @@ final class PasskeyServer
             $record->counter = 0;
         }
 
+        // Per verification, on the origins resolved for it; see finishRegistration.
+        $validator = AuthenticatorAssertionResponseValidator::create($this->ceremonySteps()->requestCeremony());
+
         try {
-            $verified = $this->assertionValidator->check(
+            $verified = $validator->check(
                 $record,
                 $assertion,
                 $options,
@@ -339,10 +478,14 @@ final class PasskeyServer
 
         $updated = $stored->with(signCount: $newCounter, lastUsedAt: $usedAt);
 
+        // Only now, after the ceremony verified and its outcome is persisted.
+        $certificate = $this->issueCertificate(CeremonyType::Authentication, $updated->id, $updated->userHandle, $certificateClaims);
+
         return [
             'credential' => $updated,
             'summary' => $updated->toSummary(),
             'userHandle' => $updated->userHandle,
+            'certificate' => $certificate,
         ];
     }
 

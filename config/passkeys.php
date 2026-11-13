@@ -135,6 +135,34 @@ return [
     |--------------------------------------------------------------------------
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Login certificates (optional, OFF by default)
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, every successful passkey sign-in (and enrollment, unless you
+    | narrow `ceremonies`) produces a canonical certificate of the ceremony plus
+    | request claims, and a token "fplc_v1_<sha256 hex>" of its bytes. Listen
+    | for FancyPasskeys\Laravel\Events\PasskeyCertificateIssued to store or log
+    | them: the package stores nothing.
+    |
+    | `claims` = null takes ip, userAgent and X-Request-Id from the request. Or
+    | name an invokable class: __invoke(Request $request, array $subject): array.
+    | Never return credentials. Keys that look sensitive are stripped anyway.
+    |
+    | A token is a hash, not a signature: it ties a record to a log line. It is
+    | never proof of a session.
+    |
+    */
+
+    'certificates' => [
+        'enabled' => (bool) env('PASSKEYS_CERTIFICATES', false),
+
+        'ceremonies' => ['authentication', 'registration'],
+
+        'claims' => null,
+    ],
+
     'table' => 'passkey_credentials',
 
     'users' => [

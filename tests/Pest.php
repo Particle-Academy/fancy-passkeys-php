@@ -120,3 +120,29 @@ function makeStoredCredential(
         createdAt: '2026-01-01T00:00:00.000Z',
     );
 }
+
+/**
+ * The origin / RP ID table shared with the Node twin
+ * (tests/fixtures/relying-party/origins.json). Used by RelyingPartyOriginsTest
+ * for construction and by DynamicOriginsTest for every resolved list.
+ *
+ * @return array{accept: list<array{rpId: string, origin: string, why: string}>, reject: list<array{rpId: string, origin: string, why: string}>}
+ */
+function relyingPartyOriginTable(): array
+{
+    $json = file_get_contents(__DIR__ . '/fixtures/relying-party/origins.json');
+
+    return json_decode((string) $json, true, flags: JSON_THROW_ON_ERROR);
+}
+
+/** @return array<string, array{string, string}> */
+function relyingPartyOriginRows(string $kind): array
+{
+    $rows = [];
+
+    foreach (relyingPartyOriginTable()[$kind] as $row) {
+        $rows[$row['origin'] . ' with RP ID ' . $row['rpId']] = [$row['rpId'], $row['origin']];
+    }
+
+    return $rows;
+}

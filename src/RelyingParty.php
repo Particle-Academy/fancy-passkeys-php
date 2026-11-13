@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FancyPasskeys;
 
+use Closure;
 use InvalidArgumentException;
 
 /**
@@ -14,20 +15,35 @@ use InvalidArgumentException;
  * where *every* ceremony fails with an opaque browser error, and it fails that
  * way in production, on login, for everyone. Failing at boot instead turns a
  * mystery outage into a stack trace with a line number.
+ *
+ * The origins may instead come from a Closure, for an app whose origin is only
+ * known at run time (a desktop app's local server on a port chosen at launch).
+ * It is called on EVERY verification, and every list it returns is validated
+ * with exactly the construction rules. Mirrors the Node twin's `OriginResolver`.
+ *
+ * Not `readonly` as a class any more: {@see self::setOrigins()} replaces the
+ * allow-list on a live instance. The ID, name and subdomain flag stay readonly.
  */
-final readonly class RelyingParty
+final class RelyingParty
 {
-    /** @var list<string> */
-    private array $origins;
+    /** @var list<string>|Closure(): list<string> */
+    private array|Closure $origins;
 
     /**
-     * @param  list<string>  $origins  Exact-match allow-list. No wildcards, no regex.
+     * @param  list<string>|Closure(): list<string>  $origins  Exact-match allow-list, or a
+     *                                                          Closure returning one. No
+     *                                                          wildcards, no regex. A Closure
+     *                                                          rather than any `callable`,
+     *                                                          because a two-string origin
+     *                                                          list can also be a callable
+     *                                                          array; wrap a method with
+     *                                                          `$this->origins(...)`.
      */
     public function __construct(
-        public string $id,
-        public string $name,
-        array $origins,
-        public bool $allowSubdomains = false,
+        public readonly string $id,
+        public readonly string $name,
+        array|Closure $origins,
+        public readonly bool $allowSubdomains = false,
     ) {
         if (trim($id) === '') {
             throw new InvalidArgumentException('The relying party ID cannot be empty.');
@@ -48,7 +64,71 @@ final readonly class RelyingParty
             );
         }
 
+        $this->origins = $origins instanceof Closure ? $origins : $this->validateOrigins($origins);
+    }
+
+    /**
+     * `web-auth`'s validators take a **host**, not an origin — `example.com`,
+     * never `https://example.com`. Passing an origin makes the RP ID hash check
+     * fail on every ceremony.
+     */
+    public function host(): string
+    {
+        return $this->id;
+    }
+
+    /**
+     * The allow-list for the verification about to run.
+     *
+     * A Closure is called on every call, and whatever it returns is validated
+     * with the construction rules every time: a value that would have been
+     * refused at boot is refused here, and the ceremony never reaches the
+     * validator. A Closure that throws propagates; no list is never "allow all".
+     *
+     * @return list<string>
+     */
+    public function origins(): array
+    {
+        $origins = $this->origins;
+
+        return $origins instanceof Closure ? $this->validateOrigins($origins()) : $origins;
+    }
+
+    /** Whether the origins come from a Closure rather than a fixed list. */
+    public function hasDynamicOrigins(): bool
+    {
+        return $this->origins instanceof Closure;
+    }
+
+    /**
+     * Replace the allowed origins: a new fixed list, or a Closure.
+     *
+     * A fixed list is validated here, and when it is refused the previous
+     * configuration stays in place: a failed update must not leave the relying
+     * party with no allow-list, or a half-applied one.
+     *
+     * @param  list<string>|Closure(): list<string>  $origins
+     */
+    public function setOrigins(array|Closure $origins): void
+    {
+        $this->origins = $origins instanceof Closure ? $origins : $this->validateOrigins($origins);
+    }
+
+    /**
+     * The origin rules, in one place: a static list at construction, a list
+     * passed to setOrigins(), and every list a Closure returns are held to
+     * exactly the same checks.
+     *
+     * @return list<string>
+     */
+    private function validateOrigins(mixed $origins): array
+    {
+        if (! is_array($origins)) {
+            throw new InvalidArgumentException('The allowed origins must be a list of origin strings.');
+        }
+
         $origins = array_values($origins);
+        $id = $this->id;
 
         if ($origins === []) {
             throw new InvalidArgumentException(
@@ -106,23 +186,8 @@ final readonly class RelyingParty
             }
         }
 
-        $this->origins = $origins;
-    }
-
-    /**
-     * `web-auth`'s validators take a **host**, not an origin — `example.com`,
-     * never `https://example.com`. Passing an origin makes the RP ID hash check
-     * fail on every ceremony.
-     */
-    public function host(): string
-    {
-        return $this->id;
-    }
-
-    /** @return list<string> */
-    public function origins(): array
-    {
-        return $this->origins;
+        /** @var list<string> $origins */
+        return $origins;
     }
 
     /**

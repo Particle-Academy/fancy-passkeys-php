@@ -6,12 +6,17 @@ namespace FancyPasskeys\Laravel;
 
 use FancyPasskeys\Contracts\ChallengeStore;
 use FancyPasskeys\Contracts\CredentialStore;
+use FancyPasskeys\IssuedLoginCertificate;
+use FancyPasskeys\Laravel\Events\PasskeyCertificateIssued;
 use FancyPasskeys\Laravel\Http\PasskeyLoginController;
+use FancyPasskeys\LoginCertificates;
 use FancyPasskeys\Laravel\Http\PasskeyRegistrationController;
 use FancyPasskeys\PasskeyPolicy;
 use FancyPasskeys\PasskeyServer;
 use FancyPasskeys\RelyingParty;
 use Illuminate\Cache\CacheManager;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -76,12 +81,60 @@ class PasskeysServiceProvider extends ServiceProvider
             $app->make(PasskeyPolicy::class),
             $app->make(ChallengeStore::class),
             $app->make(CredentialStore::class),
+            certificates: self::loginCertificates($app),
         ));
 
         $this->app->singleton(PasskeyManager::class, static fn ($app): PasskeyManager => new PasskeyManager(
             $app->make(PasskeyServer::class),
         ));
         $this->app->alias(PasskeyManager::class, 'passkeys');
+    }
+
+    /**
+     * Login certificates, from `passkeys.certificates`. Null — off — unless
+     * `enabled` is true.
+     *
+     * Claims come from the current request (IP, user agent, X-Request-Id), or
+     * from an invokable class named in `claims`, called as
+     * `(Request $request, array $subject): array`. Delivery is the
+     * {@see PasskeyCertificateIssued} event; the app's listener decides where
+     * the certificate goes.
+     */
+    private static function loginCertificates(Application $app): ?LoginCertificates
+    {
+        $config = (array) $app['config']->get('passkeys.certificates', []);
+
+        if (! (bool) ($config['enabled'] ?? false)) {
+            return null;
+        }
+
+        $claimsClass = $config['claims'] ?? null;
+
+        $claims = static function (array $subject) use ($app, $claimsClass): array {
+            $request = $app->bound('request') ? $app->make('request') : null;
+
+            if (! $request instanceof Request) {
+                return [];
+            }
+
+            if (is_string($claimsClass) && $claimsClass !== '') {
+                return (array) $app->make($claimsClass)($request, $subject);
+            }
+
+            return array_filter([
+                'ip' => $request->ip(),
+                'userAgent' => $request->userAgent(),
+                'requestId' => $request->headers->get('X-Request-Id'),
+            ], static fn (mixed $value): bool => $value !== null && $value !== '');
+        };
+
+        return new LoginCertificates(
+            ceremonies: array_values((array) ($config['ceremonies'] ?? ['registration', 'authentication'])),
+            claims: $claims,
+            deliver: static function (IssuedLoginCertificate $issued): void {
+                PasskeyCertificateIssued::dispatch($issued);
+            },
+        );
     }
 
     public function boot(): void

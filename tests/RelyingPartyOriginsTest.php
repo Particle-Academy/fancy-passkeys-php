@@ -14,25 +14,8 @@ use FancyPasskeys\RelyingParty;
  * literal is refused as an RP ID ("This is an invalid domain").
  */
 
-/** @return array{accept: list<array{rpId: string, origin: string, why: string}>, reject: list<array{rpId: string, origin: string, why: string}>} */
-function relyingPartyOriginTable(): array
-{
-    $json = file_get_contents(__DIR__ . '/fixtures/relying-party/origins.json');
-
-    return json_decode((string) $json, true, flags: JSON_THROW_ON_ERROR);
-}
-
-/** @return array<string, array{string, string}> */
-function relyingPartyOriginRows(string $kind): array
-{
-    $rows = [];
-
-    foreach (relyingPartyOriginTable()[$kind] as $row) {
-        $rows[$row['origin'] . ' with RP ID ' . $row['rpId']] = [$row['rpId'], $row['origin']];
-    }
-
-    return $rows;
-}
+// relyingPartyOriginTable() / relyingPartyOriginRows() live in Pest.php: the
+// dynamic-origins test drives the same table through a resolver.
 
 it('loads a non-empty table on both sides', function () {
     // A table that failed to load would make both datasets below vacuous.

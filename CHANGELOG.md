@@ -11,8 +11,55 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`$origins` may be a `Closure`**, called on every verification and validated
+  each time with the same rules as a static list, including the localhost and
+  IP-literal rules. `RelyingParty::setOrigins()` replaces the list or Closure (a
+  refused list leaves the old one in place); `hasDynamicOrigins()` tells the two
+  apart. Mirrors the Node twin's `OriginResolver`. Built for desktop apps whose
+  local server port is picked at launch; the README documents the single-user
+  desktop shape.
+- **Optional login certificates.** `new PasskeyServer(..., certificates: new
+  LoginCertificates(...))` (off by default) issues a canonical record of each
+  successful sign-in and enrollment, with app-supplied claims, and a token
+  `fplc_v1_<sha256 hex>` of its canonical bytes. `LoginCertificate::issue()`,
+  `::token()`, `::verify()` and `::isSensitiveKey()` are public;
+  `Support\CanonicalJson` is a copy of change-council's canonical form, and
+  `tests/fixtures/login-certificate/vectors.json` is shared with the Node twin,
+  so tokens agree across backends. Known-sensitive claim keys are stripped and
+  reported. The package stores nothing.
+- Laravel: `passkeys.certificates` config (`PASSKEYS_CERTIFICATES`, default
+  false), request claims by default, and a `PasskeyCertificateIssued` event as
+  the storage hook.
+- `finishRegistration()` takes an optional fourth argument and
+  `finishAuthentication()` an optional third, the certificate claims; both
+  results carry a `certificate` key (`null` unless certificates are on).
+  Additive: `PasskeyManager`'s signatures are unchanged, so subclasses keep
+  working.
+
+### Changed
+
+- **`RelyingParty` is no longer a `readonly` class.** `id`, `name` and
+  `allowSubdomains` are still readonly properties; only the origins are
+  mutable, through `setOrigins()`. **Consumer action:** none, unless you
+  extended it (it is `final`, so you did not).
+- **A policy algorithm that `web-auth/webauthn-lib` cannot verify is refused when
+  `PasskeyServer` is constructed.** Supported: -8, -7, -35, -36, -257, -258,
+  -259, -37, -38, -39. **Consumer action:** only if you configured another
+  identifier, which could enroll credentials that then never signed in. The
+  default list is unchanged.
+
 ### Fixed
 
+- **Ed25519 passkeys can sign in.** The default policy offers Ed25519 (-8)
+  FIRST, and registration accepted it, but the signature check only had ES256
+  and RS256 (`CeremonyStepManagerFactory`'s default). An authenticator that
+  chose Ed25519 enrolled without complaint and then failed every sign-in with
+  `verification_failed`. The signature check now has exactly the algorithms the
+  policy offers. The Node twin was not affected. **Consumer action:** none;
+  such credentials start working. Found by a new test suite that completes real
+  ceremonies with a software authenticator (tests only).
 - **`RelyingParty` now accepts `*.localhost` hosts over plain http.** A
   configuration such as RP ID `genie.localhost` with origin
   `http://genie.localhost:5678` threw at construction, although Chromium runs
