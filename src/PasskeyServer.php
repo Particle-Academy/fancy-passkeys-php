@@ -37,8 +37,10 @@ use Webauthn\AuthenticatorAttestationResponse;
 use Webauthn\AuthenticatorAttestationResponseValidator;
 use Webauthn\AuthenticatorSelectionCriteria;
 use Webauthn\CeremonyStep\CeremonyStepManagerFactory;
+use Webauthn\CeremonyStep\CheckAllowedOrigins;
 use Webauthn\CredentialRecord;
 use Webauthn\Denormalizer\WebauthnSerializerFactory;
+use Webauthn\Exception\AuthenticatorResponseVerificationException;
 use Webauthn\Exception\CounterException;
 use Webauthn\PublicKeyCredential;
 use Webauthn\PublicKeyCredentialCreationOptions;
@@ -68,6 +70,9 @@ use Webauthn\TrustPath\EmptyTrustPath;
  */
 final class PasskeyServer
 {
+    /** The nil UUID, for a credential with no AAGUID (Symfony's Uuid::NIL is protected). */
+    private const NIL_AAGUID = '00000000-0000-0000-0000-000000000000';
+
     /**
      * The COSE signature algorithms `web-auth` can verify, by identifier: the
      * library's own classes, selected here, never implemented here.
@@ -168,7 +173,7 @@ final class PasskeyServer
      * every time; an invalid list throws InvalidArgumentException (a
      * configuration error, the app's 500) before any validator exists.
      */
-    private function ceremonySteps(): CeremonyStepManagerFactory
+    private function ceremonySteps(array $origins): CeremonyStepManagerFactory
     {
         $factory = new CeremonyStepManagerFactory();
         $factory->setAttestationStatementSupportManager($this->attestationSupport);
@@ -178,9 +183,45 @@ final class PasskeyServer
         // "notexample.com" in every implementation that gets it wrong.
         // (`setSecuredRelyingPartyId()` is deprecated in 5.2 and is dead code
         // once an explicit origin list is set, so it is deliberately not used.)
-        $factory->setAllowedOrigins($this->rp->origins(), $this->rp->allowSubdomains);
+        $factory->setAllowedOrigins($origins, $this->rp->allowSubdomains);
 
         return $factory;
+    }
+
+    /**
+     * Refuse a response whose client data names an origin outside the
+     * allow-list, as `origin_not_allowed`, before anything credential-specific
+     * happens.
+     *
+     * The rule is the library's: this runs web-auth's own CheckAllowedOrigins
+     * step, built exactly as the factory builds it, so nothing here decides
+     * what an allowed origin is. The full ceremony still runs it again.
+     *
+     * Why first: inside the ceremony the origin check is only reached for a
+     * credential we hold. An unknown credential stops earlier, as
+     * `unknown_credential`, so a wrong-origin assertion would answer
+     * `origin_not_allowed` for a stored credential and `verification_failed`
+     * for any other: a credential-existence oracle. Here the answer depends on
+     * the origin alone. The step reads only the response's client data; the
+     * record handed to it is a placeholder it never inspects.
+     *
+     * @param  list<string>  $origins
+     */
+    private function refuseForeignOrigin(AuthenticatorAssertionResponse|AuthenticatorAttestationResponse $response, array $origins): void
+    {
+        $step = new CheckAllowedOrigins($origins, $this->rp->allowSubdomains);
+
+        try {
+            $step->process(
+                CredentialRecord::create('', PublicKeyCredentialDescriptor::CREDENTIAL_TYPE_PUBLIC_KEY, [], 'none', EmptyTrustPath::create(), Uuid::fromString(self::NIL_AAGUID), '', '', 0),
+                $response,
+                PublicKeyCredentialRequestOptions::create('', $this->rp->id),
+                null,
+                $this->rp->host(),
+            );
+        } catch (AuthenticatorResponseVerificationException $e) {
+            throw PasskeyException::originNotAllowed($e);
+        }
     }
 
     /**
@@ -287,6 +328,12 @@ final class PasskeyServer
             throw PasskeyException::invalidResponse();
         }
 
+        // Resolved once for this verification: the pre-check and the ceremony
+        // see the same list. A refused list is a configuration error (the
+        // app's 500), not a failed ceremony to report to the client.
+        $origins = $this->rp->origins();
+        $this->refuseForeignOrigin($attestation, $origins);
+
         $credentialId = Base64Url::encode($credential->rawId);
 
         // (2) Reject a credential ID already registered to ANYONE. Registered
@@ -319,7 +366,7 @@ final class PasskeyServer
         // Built per verification on the origins resolved for it. Outside the
         // try: a refused origin list is a configuration error, not a failed
         // ceremony to report to the client.
-        $validator = AuthenticatorAttestationResponseValidator::create($this->ceremonySteps()->creationCeremony());
+        $validator = AuthenticatorAttestationResponseValidator::create($this->ceremonySteps($origins)->creationCeremony());
 
         try {
             // (3) Only now does anything cryptographic happen.
@@ -396,6 +443,10 @@ final class PasskeyServer
             throw PasskeyException::invalidResponse();
         }
 
+        // BEFORE the credential lookup: see refuseForeignOrigin().
+        $origins = $this->rp->origins();
+        $this->refuseForeignOrigin($assertion, $origins);
+
         $credentialId = Base64Url::encode($credential->rawId);
         $stored = $this->credentials->findById($credentialId);
 
@@ -434,7 +485,7 @@ final class PasskeyServer
         }
 
         // Per verification, on the origins resolved for it; see finishRegistration.
-        $validator = AuthenticatorAssertionResponseValidator::create($this->ceremonySteps()->requestCeremony());
+        $validator = AuthenticatorAssertionResponseValidator::create($this->ceremonySteps($origins)->requestCeremony());
 
         try {
             $verified = $validator->check(
@@ -664,7 +715,7 @@ final class PasskeyServer
             $stored->transports,
             $stored->attestationFormat ?? 'none',
             EmptyTrustPath::create(),
-            $stored->aaguid === null ? Uuid::fromString(Uuid::NIL) : Uuid::fromString($stored->aaguid),
+            Uuid::fromString($stored->aaguid ?? self::NIL_AAGUID),
             Base64Url::decode($stored->publicKey),
             Base64Url::decode($stored->userHandle),
             $stored->signCount,

@@ -39,8 +39,13 @@ class PasskeysServiceProvider extends ServiceProvider
             /** @var list<string> $origins */
             $origins = array_values((array) ($config['origins'] ?? []));
 
-            // Throws here — at boot, with a stack trace — rather than on every
-            // login in production with an opaque browser error.
+            // Throws here, with the reason, rather than on every login in
+            // production with an opaque browser error. This is a lazy
+            // singleton, so "here" is the first passkey request, NOT app boot:
+            // the default config is derived from APP_URL, and failing at boot
+            // would take down every page and every artisan command (including
+            // composer's package:discover) of an app on http://myapp.test that
+            // has not configured passkeys yet. RelyingPartyResolutionTest pins this.
             return new RelyingParty(
                 (string) ($config['id'] ?? ''),
                 (string) ($config['name'] ?? ''),

@@ -35,7 +35,10 @@ it('rejects a response whose clientDataJSON origin is not on the allow-list', fu
         $server->finishAuthentication($start['state'], $response);
         $this->fail('A disallowed origin was accepted.');
     } catch (PasskeyException $e) {
-        expect($e->errorCode)->toBe(PasskeyErrorCode::VerificationFailed);
+        // origin_not_allowed, as the Node twin answers (tests/fixtures/errors/codes.json).
+        // Decided before the credential lookup, so it is not an existence oracle.
+        expect($e->errorCode)->toBe(PasskeyErrorCode::OriginNotAllowed);
+        expect($e->httpStatus())->toBe(400);
 
         // It really was the origin that stopped it, not something further on:
         // the library's own message says so. That message stays in `previous`,

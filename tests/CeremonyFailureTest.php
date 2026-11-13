@@ -321,3 +321,34 @@ it('does not tell the store to save anything when verification fails', function 
 
     expect($store->all())->toBe([]);
 });
+
+it('verifies a stored credential with no AAGUID instead of crashing', function () {
+    // StoredCredential::$aaguid is nullable, and the record handed to the
+    // library used to be built with a protected Symfony constant for that
+    // case: an Error (a 500) on every sign-in with such a credential, before
+    // any verification ran. It must reach verification and fail as a ceremony.
+    $credential = new FancyPasskeys\StoredCredential(
+        id: 'Y3JlZC1vbmU',
+        publicKey: 'bm90LWEta2V5',
+        userHandle: ALICE,
+        signCount: 0,
+        transports: ['internal'],
+        aaguid: null,
+        backedUp: false,
+        backupEligible: false,
+        uvInitialized: true,
+        attestationFormat: 'none',
+        name: 'Test key',
+        createdAt: '2026-01-01T00:00:00.000Z',
+    );
+    $server = makePasskeyServer([$credential]);
+    $start = $server->startAuthentication(ALICE);
+
+    $code = errorCodeOf(fn () => $server->finishAuthentication($start['state'], Ceremony::authenticationResponse(
+        $start['publicKey']['challenge'],
+        Base64Url::decode($credential->id),
+        ALICE,
+    )));
+
+    expect($code)->toBe(PasskeyErrorCode::VerificationFailed);
+});

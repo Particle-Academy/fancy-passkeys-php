@@ -112,6 +112,13 @@ and the Node repo asserts against the same files. If you change a wire shape
 here, change it there in the same session, or the pair quietly stops being a
 pair.
 
+Errors are part of that contract: `tests/fixtures/errors/codes.json` (shared
+byte-for-byte) pins every code's HTTP status and wire code, plus what named
+failures answer, and `tests/ErrorParityTest.php` runs them through the real
+ceremony steps. A wrong origin is decided before the credential lookup (with
+web-auth's own `CheckAllowedOrigins`), so it answers `origin_not_allowed`
+whether or not the credential exists.
+
 ## Login certificates: the same bytes in both runtimes
 
 `src/Support/CanonicalJson.php` is a COPY of change-council's class (the class

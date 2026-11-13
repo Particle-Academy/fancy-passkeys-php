@@ -49,8 +49,32 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   -259, -37, -38, -39. **Consumer action:** only if you configured another
   identifier, which could enroll credentials that then never signed in. The
   default list is unchanged.
+- **BREAKING (wire): a wrong-origin response now answers `origin_not_allowed`
+  (400), not `verification_failed` (401)**, for sign-in and registration alike.
+  This is what the Node twin has always answered; the `passkeys` lab benchmark
+  found the two disagreeing on the same assertion. The origin is now decided
+  BEFORE the credential is looked up, using web-auth's own `CheckAllowedOrigins`
+  step, so the answer is the same whether or not the credential exists and is
+  not an existence oracle. The shared fixture `tests/fixtures/errors/codes.json`
+  (byte-identical in both repos) pins every code's status and wire code and
+  these named failures. **Consumer action:** only if your client branches on
+  `verification_failed` or a 401 to detect a wrong origin; `fancy-passkeys-ui`
+  already handles `origin_not_allowed`.
 
 ### Fixed
+
+- **A stored credential with no AAGUID no longer crashes sign-in.** The record
+  handed to the library was built with Symfony's `Uuid::NIL`, a protected
+  constant, so a credential whose `aaguid` was null threw an `Error` (a 500)
+  before any verification ran. **Consumer action:** none.
+- **README: a bad relying party is refused on the first passkey request, not at
+  boot** as it said. In Laravel the `RelyingParty` singleton is lazy, so a bad
+  `passkeys.rp` answers that request with a 500 (the reason is in the log) and
+  never issues ceremony options. It stays lazy on purpose: the default config
+  is derived from `APP_URL`, and failing at boot would take down every page and
+  every artisan command (including `package:discover`) for an app on
+  `http://myapp.test` that has not configured passkeys yet. The README shows a
+  one-line deploy check for anyone who wants it to fail fast.
 
 - **Ed25519 passkeys can sign in.** The default policy offers Ed25519 (-8)
   FIRST, and registration accepted it, but the signature check only had ES256

@@ -111,6 +111,11 @@ final class PasskeyException extends RuntimeException
      * trying not to build. The two that survive are redacted again at the wire
      * by {@see PasskeyErrorCode::wireCode()}, so the client sees one answer.
      *
+     * A wrong origin never gets this far: {@see PasskeyServer} decides it
+     * before the credential lookup, as `origin_not_allowed`, so the answer is
+     * the same whether or not the credential exists (and matches the Node
+     * twin; tests/fixtures/errors/codes.json).
+     *
      * The upstream message is never copied into the client-visible message. It
      * survives only as `previous`.
      */

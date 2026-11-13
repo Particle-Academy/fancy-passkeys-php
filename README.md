@@ -62,9 +62,20 @@ PASSKEYS_ORIGINS=https://example.com,https://www.example.com
 ```
 
 The RP ID must be the host of every configured origin, or a registrable suffix
-of it. If it is not, `RelyingParty` throws **at boot**, not on the first login —
-a misconfigured relying party otherwise surfaces as every ceremony in production
-failing with an opaque browser error and no server-side signal at all.
+of it. If it is not, `RelyingParty` throws an `InvalidArgumentException` when it
+is constructed. In Laravel that is **the first passkey request** (the first time
+anything resolves the passkey server), not app boot: that request answers 500
+and the exception, with the reason, lands in your log, and no ceremony options
+are ever issued. It is not at boot on purpose. The default configuration is
+derived from `APP_URL`, so an app on `http://myapp.test` that has not yet set
+`PASSKEYS_*` would otherwise fail every page and every `artisan` command,
+including the `package:discover` that `composer require` runs.
+
+To fail fast in a deploy step instead, resolve it there:
+
+```bash
+php artisan tinker --execute="app(FancyPasskeys\RelyingParty::class);"
+```
 
 For local development: `PASSKEYS_RP_ID=localhost` and
 `PASSKEYS_ORIGINS=http://localhost:5173`. `http://` is accepted only on
