@@ -28,6 +28,13 @@ is not part of the contract — so one React surface works against either backen
 
 ---
 
+<!-- fancy-agents-note:start -->
+> **For agents.** This package is listed on the Fancy MCP catalog server at
+> `https://ui.particle.academy/mcp` (streamable HTTP, no API key; MCP id `fancy-ui`),
+> with install commands and docs, alongside the rest of the kit. How an agent
+> installs and uses this package is in [AGENTS.md](https://github.com/Particle-Academy/fancy-passkeys-php/blob/main/AGENTS.md).
+<!-- fancy-agents-note:end -->
+
 ## Install
 
 ```bash
@@ -518,28 +525,6 @@ shipping it.
   directly; only Laravel gets a first-class bridge.
 - **Cross-device linking specifics.** The browser handles hybrid transport; we
   expose the `transports` hints and nothing more.
-
----
-
-## Tests
-
-```bash
-composer install
-vendor/bin/pest
-```
-
-**Failure paths come first.** Auth code with only a happy-path test is untested
-code — the happy path is what an attacker never uses. Covered: replayed
-challenge (both ceremonies), expired challenge, ceremony-type mismatch in both
-directions, disallowed origin, disallowed subdomain, unknown credential,
-cross-user credential reuse, same-user reuse, user-handle mismatch, malformed
-response, and the full counter rule.
-
-None of these needs a real authenticator, and that is the design being
-observable rather than a convenience: every one of those checks fires *before*
-any signature is verified, so a response that merely parses is enough to reach
-it. If one of them ever starts needing a valid signature, the ordering has been
-inverted and the anti-replay property is gone.
 
 ---
 
