@@ -41,7 +41,7 @@ is not part of the contract — so one React surface works against either backen
 composer require particle-academy/fancy-passkeys
 ```
 
-Requires PHP 8.4+. Laravel (11.x–13.x) and Fortify are **suggests**, not
+Requires PHP 8.4+. Laravel (13.x; older is refused) and Fortify are **suggests**, not
 requirements — the core runs without them.
 
 ---

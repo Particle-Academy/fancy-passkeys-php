@@ -36,8 +36,12 @@
         "spomky-labs/cbor-php": "^3.0"
     },
     "suggest": {
-        "illuminate/support": "Only needed for the optional Laravel bridge — service provider, Eloquent credential store, migrations, routes, and the Fortify-compatible login controller. Compatible with 11.x through 13.x. The framework-free PasskeyServer needs none of it.",
+        "illuminate/support": "Only needed for the optional Laravel bridge — service provider, Eloquent credential store, migrations, routes, and the Fortify-compatible login controller. Needs ^13.0 (Laravel 13+). The framework-free PasskeyServer needs none of it.",
         "laravel/fortify": "Passkey login registers alongside Fortify's routes and authenticates on Fortify's configured guard, so an app keeps password login, reset, and 2FA untouched."
+    },
+    "conflict": {
+        "laravel/framework": "<13.0",
+        "illuminate/support": "<13.0"
     },
     "autoload": {
         "psr-4": {
