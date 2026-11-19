@@ -14,7 +14,8 @@ use FancyPasskeys\Tests\Support\TestClock;
 
 /*
  * Core tests are pure unit tests — no framework binding at all, which is the
- * point of keeping Illuminate out of src/. Only tests/Laravel binds Testbench.
+ * point of keeping Illuminate out of src/. Only tests/Laravel boots a Laravel kernel
+ * (a first-party one, no testbench).
  */
 uses(
     FancyPasskeys\Tests\Laravel\TestCase::class,

@@ -16,6 +16,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Rebranded the display name to Fancy Dev Kit (README and package description). Package names, the npm scope, URLs and the `fancy-ui` MCP id are unchanged.
 - **Docs:** `AGENTS.md` is now the guide to using this package (install, its entries on the Fancy MCP catalog server, API essentials, traps). The contributor notes it held moved to `CONTRIBUTING.md`, and `CLAUDE.md` is now a symlink to it. The README points to the MCP server and to `AGENTS.md`. No code changed; nothing to do.
 - CI: re-pin org third-party allowlist to 2614224
+- Tests: the Laravel bridge tests boot a first-party kernel (`tests/Laravel/TestCase.php`) instead of `orchestra/testbench`; `orchestra/testbench` and `phpunit/phpunit` are removed from `require-dev`, and Pest moves to `^5.0`. `laravel/framework` is now a direct test dependency (the framework this package integrates with). Same 285 tests, same 580 assertions. No runtime change; nothing to do.
 
 ## [0.3.0] - 2026-11-13
 
